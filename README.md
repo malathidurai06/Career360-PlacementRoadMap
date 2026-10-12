@@ -1,57 +1,67 @@
 # Career 360 — Student Career Roadmap & Placement Readiness Tracking System
 
-A browser-based placement preparation tracker built with pure HTML5, CSS3, and
-vanilla JavaScript (ES6+). All data is saved locally via `localStorage` — no
-server, build step, or install required.
+An all-in-one placement preparation tracking and readiness system built exclusively with pure **HTML5, Modern CSS3 (Glassmorphism & Multi-Theming), and Vanilla JavaScript (ES6+)**.
 
-## Folder structure
-```
-project/
-├── index.html      Page shell — links the stylesheet and script below
-├── css/
-│   └── style.css    All styling (layout, components, theme)
-├── js/
-│   └── script.js    App logic: state, rendering, storage, charts
-└── README.md
-```
+All data is safely managed locally in your browser's `localStorage` — zero backend servers, zero build steps, and zero dependencies required.
 
-## Running it
-Just open `index.html` in any modern browser (double-click it, or serve the
-folder with any static file server). No build tools, no npm install.
+---
 
-Two external resources load over the network for styling and charts:
-- Google Fonts (Space Grotesk, Inter, JetBrains Mono)
-- Chart.js (via cdnjs) for the Analytics charts
+## 🎨 Multi-Theme System
+Switch themes on the fly with the built-in Theme Selector in the sidebar:
+- 🌌 **Midnight Indigo** (Default) — Deep indigo/violet neon aesthetic with glowing accents.
+- ⚡ **Cyber Obsidian** — Pitch-black dark mode with high-contrast emerald & cyan accents.
+- ❄️ **Nordic Slate** — Calming slate navy & ice-blue palette.
+- ☀️ **Light Studio** — Crisp, clean, modern light mode.
 
-If you need it fully offline, download those and update the `<link>`/`<script>`
-tags in `index.html` to point to local copies.
+---
 
-## Features
-- **Profile & career goals** — academic details, target role, companies, timeline
-- **Roadmap & tasks** — categorized across Aptitude, DSA, Programming Languages,
-  Projects, Communication, Resume, and Company-Specific Prep; full add/edit/
-  complete/delete, with search and filters by category, status, and priority
-- **Readiness scoring** — overall % and category % completion, mapped to
-  Beginner / Intermediate / Advanced / Interview-Ready
-- **Analytics** — weekly completions, 14-day readiness trend, category
-  breakdown, and automatic skill-gap detection
-- **Gamification** — current & longest streaks, 30-day consistency, and an
-  11-badge achievement system with unlock dates
-- **Resources** — curated reference videos, articles, and practice-site links
-  for every category (e.g. takeUforward and GeeksforGeeks for DSA, IndiaBIX
-  and PrepInsta for Aptitude, freeCodeCamp and CodeWithHarry for Programming
-  Languages), so prep material and progress tracking live in one app. Edit
-  the `RESOURCES` object near the top of `js/script.js` to add your own links.
-- **Practice** — actual practice happens inside the app, not just links out:
-  5-question auto-graded quizzes for Aptitude, DSA, Programming Languages,
-  and Company-Specific Prep, plus self-practice prompts (speaking topics,
-  resume checklist, project ideas) for Communication, Resume, and Projects.
-  Attempts, scores, and streaks feed into Achievements. Edit `PRACTICE_QUIZ`
-  and `PRACTICE_PROMPTS` in `js/script.js` to add your own questions.
-- **Export** — download your data as `.json` or a readable `.txt` report
+## 🚀 Key Features & Full Functionality
 
-## Data storage
-Everything (profile, tasks, streaks, achievements, history) is stored under a
-single `localStorage` key: `placementTrackerData_v1`. Clearing your browser's
-site data for this file will erase it — use the export buttons on the
-Analytics page to back up your progress.
+### 1. 📊 Interactive Readiness Dashboard
+- **SVG Semi-Circular Readiness Gauge**: Real-time calculated score mapped to *Beginner*, *Intermediate*, *Advanced*, or *Interview-Ready*.
+- **Subway Route Map**: Interactive graphical route connecting all 8 placement preparation tracks.
+- **AI Recommendation Engine**: Pinpoints skill gaps, lagging topics, and overdue tasks.
+- **One-Click Daily Check-in**: Streak tracking with active flame indicator.
+
+### 2. 🗺️ Placement Roadmap & Task Manager
+- Categorized across **8 core tracks**:
+  1. *Aptitude & Logical Reasoning*
+  2. *Data Structures & Algorithms (DSA)*
+  3. *Programming Languages (C++, Java, Python, JS)*
+  4. *Core CS (DBMS, OS, Networks, SQL)*
+  5. *Projects & Portfolio*
+  6. *Communication & HR Skills*
+  7. *Resume & ATS Optimization*
+  8. *Company-Specific Placement Prep*
+- Full CRUD task operations with status toggling, search query matching, priority pills, and category filtering.
+- One-click **"Load Starter Roadmap"** with 20+ curated placement topics.
+
+### 3. 🧠 Comprehensive Practice Arena
+- **Auto-Graded Quizzes**: 5-question timed quizzes with instant option validation and in-depth answer explanations.
+- **🗂️ 3D Interactive Flashcards**: Quick technical revision flashcards (DSA, Core CS, OOPs, HR) with 3D flip card animations and mastery filters.
+- **🎙️ Timed Mock Interview Simulator**: Built-in 3-minute pitch countdown timer, STAR technique guidelines, and response logger.
+- **Practice History Log**: Records all quiz scores, percentages, and timestamps.
+
+### 4. 📄 In-Browser ATS Resume Checker
+- Paste resume text and select your target engineering domain (SDE, Data Analyst, DevOps).
+- Evaluates keyword density, impact action verbs, quantified metric outcomes (%, numbers), and formatting completeness.
+- Computes an instant ATS Match Score (0–100) with actionable keyword recommendations.
+
+### 5. 💼 Placement Drives & Company Tracker
+- Track target company campus drives (e.g. Google, Amazon, TCS, Infosys, Zoho).
+- Record CTC packages, interview dates, hiring stages (*Wishlist*, *Applied*, *Online Assessment*, *Technical Round*, *HR Round*, *Offer Received*, *Rejected*), and round notes.
+
+### 6. 📈 Dynamic Analytics & Data Backup
+- **4 Chart.js Visualizations**: Weekly Task Velocity, Category Readiness %, 14-Day Momentum Line Trend, and Quiz Accuracy.
+- **JSON Backup & Import**: Easily backup or restore your progress across devices.
+- **Printable Placement Dossier**: One-click print / PDF export formatted for placement cells and mentors.
+
+### 7. 🏆 Gamification & Badges
+- 16 collectible achievement badges with animated celebratory confetti on unlock.
+- 30-day activity matrix and streak calculator.
+
+---
+
+## 💻 Running the App
+Double-click [index.html](file:///c:/Users/M.%20MALATHI/Downloads/student-career-roadmap-tracker-project_3/index.html) in any modern web browser (Chrome, Edge, Firefox, Safari).
+No installation, `npm install`, or terminal setup is required!
