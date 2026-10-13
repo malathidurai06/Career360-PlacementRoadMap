@@ -1,7 +1,11 @@
-/* =========================================================
-   CAREER 360 — STUDENT CAREER ROADMAP & PLACEMENT SYSTEM
-   Pure Vanilla JavaScript (ES6+) — 100% Fully Functional & Interactive
-========================================================= */
+/**
+ * Career360 — Student Career Roadmap & Placement Readiness Tracker
+ * Full-Stack Placement Tracking & Analytics Application
+ *
+ * Developed by: Malathi Durai
+ * Repository: github.com/malathidurai06/Career360-PlacementRoadMap
+ * Stack: Node.js, Express, MongoDB (Mongoose), Vanilla JavaScript (ES6+), Modern CSS3
+ */
 
 const STORE_KEY = "placementTrackerData_v2";
 
@@ -210,6 +214,7 @@ function defaultData() {
       timeline: ""
     },
     theme: "midnight",
+    bgStyle: "grid",
     tasks: STARTER_TASKS.map((t, idx) => ({
       id: "task_" + idx,
       title: t.title,
@@ -235,6 +240,122 @@ let DATA = defaultData();
 let STORAGE_BLOCKED = false;
 let BANNER_DISMISSED = false;
 
+/* =========================================================
+   PERSISTENT DATABASE LAYER (NeDB Local DB + Optional Cloud Sync)
+========================================================= */
+let DB_STATE = {
+  connected: false,
+  engine: 'Persistent Local DB (NeDB)',
+  file: 'data/career360.db',
+  recordCount: 1,
+  syncing: false,
+  lastSync: null,
+  mongoConnected: false,
+  mongoUri: '',
+  error: null
+};
+
+let dbSyncTimer = null;
+
+async function checkMongoStatus() {
+  try {
+    const res = await fetch('/api/status');
+    if (!res.ok) throw new Error('API server unavailable');
+    const json = await res.json();
+    DB_STATE.connected = !!json.connected;
+    DB_STATE.engine = json.engine || 'Persistent Local DB (NeDB)';
+    DB_STATE.file = json.dbFile || 'data/career360.db';
+    DB_STATE.recordCount = json.recordCount || 1;
+    if (json.mongoSync) {
+      DB_STATE.mongoConnected = !!json.mongoSync.connected;
+      DB_STATE.mongoUri = json.mongoSync.uriMasked || '';
+      DB_STATE.error = json.mongoSync.error || null;
+    }
+  } catch (e) {
+    DB_STATE.connected = false;
+  }
+  updateDbStatusPill();
+}
+
+async function fetchMongoData() {
+  try {
+    DB_STATE.syncing = true;
+    updateDbStatusPill();
+    const res = await fetch('/api/data');
+    if (!res.ok) throw new Error('Could not fetch data from database');
+    const json = await res.json();
+    if (json.ok && json.data) {
+      const remote = json.data;
+      if (remote.tasks && remote.tasks.length > 0) {
+        DATA.tasks = remote.tasks;
+      }
+      if (remote.profile) {
+        DATA.profile = Object.assign(defaultData().profile, remote.profile);
+      }
+      if (remote.companies) DATA.companies = remote.companies;
+      if (remote.knownFlashcards) DATA.knownFlashcards = remote.knownFlashcards;
+      if (remote.stats) DATA.stats = remote.stats;
+      if (remote.achievements) DATA.achievements = remote.achievements;
+      if (remote.history) DATA.history = remote.history;
+      if (remote.checkinDates) DATA.checkinDates = remote.checkinDates;
+      if (remote.practiceHistory) DATA.practiceHistory = remote.practiceHistory;
+      if (remote.theme) {
+        DATA.theme = remote.theme;
+        applyTheme(remote.theme, false);
+      }
+      if (remote.bgStyle) {
+        DATA.bgStyle = remote.bgStyle;
+        applyBgStyle(remote.bgStyle, false);
+      }
+
+      DB_STATE.connected = true;
+      DB_STATE.lastSync = new Date();
+      saveData(false);
+      render();
+    }
+  } catch (err) {
+    console.log('[DB Sync] Loaded from browser cache:', err.message);
+  } finally {
+    DB_STATE.syncing = false;
+    updateDbStatusPill();
+  }
+}
+
+function syncMongoData() {
+  if (dbSyncTimer) clearTimeout(dbSyncTimer);
+  dbSyncTimer = setTimeout(async () => {
+    try {
+      DB_STATE.syncing = true;
+      updateDbStatusPill();
+      const res = await fetch('/api/data', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(DATA)
+      });
+      if (res.ok) {
+        DB_STATE.connected = true;
+        DB_STATE.lastSync = new Date();
+        flashSaved('Saved to Database (career360.db)');
+      }
+    } catch (e) {
+      // Offline fallback
+    } finally {
+      DB_STATE.syncing = false;
+      updateDbStatusPill();
+    }
+  }, 600);
+}
+
+function updateDbStatusPill() {
+  const btn = document.getElementById('btn-db-status');
+  if (!btn) return;
+  btn.className = `db-status-pill ${DB_STATE.connected ? 'connected' : 'offline'}`;
+  const span = btn.querySelector('span:not(.db-dot)');
+  if (span) {
+    span.textContent = DB_STATE.syncing ? 'Saving...' : (DB_STATE.connected ? '🟢 Database: Active' : 'Offline Mode');
+  }
+}
+
 function loadData() {
   try {
     const raw = localStorage.getItem(STORE_KEY);
@@ -243,6 +364,7 @@ function loadData() {
       DATA = Object.assign(defaultData(), parsed);
       DATA.tasks = DATA.tasks || defaultData().tasks;
       DATA.profile = DATA.profile || defaultData().profile;
+      DATA.bgStyle = DATA.bgStyle || "grid";
 
       // Clean up legacy dummy defaults if present so user gets a fresh slate
       if (DATA.profile.name === "Placement Aspirant") DATA.profile.name = "";
@@ -269,10 +391,13 @@ function loadData() {
   }
 }
 
-function saveData() {
+function saveData(syncRemote = true) {
   try {
     localStorage.setItem(STORE_KEY, JSON.stringify(DATA));
     STORAGE_BLOCKED = false;
+    if (syncRemote) {
+      syncMongoData();
+    }
     return true;
   } catch (e) {
     console.error("Storage error:", e);
@@ -281,10 +406,16 @@ function saveData() {
   }
 }
 
-function applyTheme(themeName) {
-  DATA.theme = themeName;
-  document.documentElement.setAttribute("data-theme", themeName);
-  saveData();
+function applyTheme(themeName, shouldSave = true) {
+  DATA.theme = themeName || "midnight";
+  document.documentElement.setAttribute("data-theme", DATA.theme);
+  if (shouldSave) saveData();
+}
+
+function applyBgStyle(bgName, shouldSave = true) {
+  DATA.bgStyle = bgName || "grid";
+  document.documentElement.setAttribute("data-bg", DATA.bgStyle);
+  if (shouldSave) saveData();
 }
 
 function uid() {
@@ -558,6 +689,7 @@ function renderRail() {
 
   const currentStreak = computeCurrentStreak();
   const theme = DATA.theme || "midnight";
+  const bgStyle = DATA.bgStyle || "grid";
   const displayName = DATA.profile.name ? escapeHtml(DATA.profile.name) : "Welcome Aspirant";
   const displaySub = DATA.profile.targetRole ? escapeHtml(DATA.profile.targetRole) : "Set up your profile →";
 
@@ -584,14 +716,27 @@ function renderRail() {
 
     <div class="theme-selector-wrap">
       <div class="theme-label">
-        <span>Active Theme</span>
+        <span>Color Theme</span>
         <span style="color:var(--primary)">●</span>
       </div>
       <div class="theme-options">
-        <button class="theme-btn ${theme === 'midnight' ? 'active' : ''}" data-theme-set="midnight" title="Midnight Indigo">🌌</button>
+        <button class="theme-btn ${theme === 'midnight' ? 'active' : ''}" data-theme-set="midnight" title="Midnight Aurora">🌌</button>
         <button class="theme-btn ${theme === 'cyber-obsidian' ? 'active' : ''}" data-theme-set="cyber-obsidian" title="Cyber Obsidian">⚡</button>
-        <button class="theme-btn ${theme === 'nordic-slate' ? 'active' : ''}" data-theme-set="nordic-slate" title="Nordic Slate">❄️</button>
+        <button class="theme-btn ${theme === 'deep-ocean' ? 'active' : ''}" data-theme-set="deep-ocean" title="Oceanic Sapphire">🌊</button>
+        <button class="theme-btn ${theme === 'tokyo-sunset' ? 'active' : ''}" data-theme-set="tokyo-sunset" title="Tokyo Sunset">🌆</button>
+        <button class="theme-btn ${theme === 'nordic-slate' ? 'active' : ''}" data-theme-set="nordic-slate" title="Nordic Frost">❄️</button>
         <button class="theme-btn ${theme === 'light-studio' ? 'active' : ''}" data-theme-set="light-studio" title="Light Studio">☀️</button>
+      </div>
+
+      <div class="bg-style-label">
+        <span>Background Style</span>
+        <span style="color:var(--accent-cyan)">✦</span>
+      </div>
+      <div class="bg-style-options">
+        <button class="bg-btn ${bgStyle === 'grid' ? 'active' : ''}" data-bg-set="grid" title="Matrix Grid Pattern">📐 Grid</button>
+        <button class="bg-btn ${bgStyle === 'aurora' ? 'active' : ''}" data-bg-set="aurora" title="Ambient Aurora Glow">🌟 Glow</button>
+        <button class="bg-btn ${bgStyle === 'nebula' ? 'active' : ''}" data-bg-set="nebula" title="Cosmic Stars">🌌 Stars</button>
+        <button class="bg-btn ${bgStyle === 'minimal' ? 'active' : ''}" data-bg-set="minimal" title="Clean Minimalist">💎 Clean</button>
       </div>
 
       <div class="rail-footer-card">
@@ -601,6 +746,11 @@ function renderRail() {
           <div style="color:var(--text-faint)">${currentStreak > 0 ? "Keep the streak alive!" : "Check in today"}</div>
         </div>
         <button class="btn small accent-emerald" id="btn-quick-checkin" title="Log today's study check-in">+1</button>
+      </div>
+
+      <div class="dev-credit-card">
+        <span>Dev: <b>Malathi Durai</b></span>
+        <a href="https://github.com/malathidurai06/Career360-PlacementRoadMap" target="_blank" rel="noopener">Repo ↗</a>
       </div>
     </div>
   </div>`;
@@ -647,6 +797,10 @@ function renderTopHeader() {
           <span>${daysLeft > 0 ? `${daysLeft} Days to Target Placement` : "Placement Season Active!"}</span>
         </div>
       ` : ""}
+      <button class="db-status-pill ${MONGO_STATE.connected ? 'connected' : 'offline'}" id="btn-db-status" title="MongoDB Connection & Storage Manager">
+        <span class="db-dot"></span>
+        <span>${MONGO_STATE.syncing ? 'Syncing...' : (MONGO_STATE.connected ? 'MongoDB Active' : 'Local Mode')}</span>
+      </button>
       <button class="btn primary small" data-open-task="__new">${ICONS.plus} Quick Task</button>
     </div>
   </div>`;
@@ -1663,6 +1817,55 @@ function renderProfile() {
    TASK & COMPANY MODALS
 ========================================================= */
 function renderModal() {
+  if (modalState.type === "database") {
+    const isConn = DB_STATE.connected;
+    const taskCount = DATA.tasks.length;
+    const compCount = DATA.companies.length;
+    const pracCount = DATA.practiceHistory.length;
+
+    return `
+    <div class="overlay" id="overlay">
+      <div class="modal" style="max-width: 540px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
+          <h3 style="margin:0;">🗄️ Database Management Center</h3>
+          <span class="${isConn ? 'db-badge-connected' : 'db-badge-offline'}">
+            ● ${isConn ? 'Connected & Persistent' : 'Local Mode'}
+          </span>
+        </div>
+
+        <div style="padding:10px 14px;background:rgba(16,185,129,0.08);border:1px solid rgba(16,185,129,0.25);border-radius:10px;margin-bottom:14px;font-size:12px;line-height:1.5;">
+          <b style="color:var(--accent-emerald);">🟢 Active Database Engine:</b> <span>${escapeHtml(DB_STATE.engine || 'Persistent Local DB (NeDB)')}</span><br>
+          <span style="color:var(--text-muted);font-size:11.5px;">Storage File: <code class="mono" style="color:var(--accent-primary);">${escapeHtml(DB_STATE.file || 'data/career360.db')}</code></span><br>
+          <span style="color:var(--text-muted);font-size:11.5px;">All tasks, practice tests, companies, and goals are persistently stored on disk in your project folder.</span>
+        </div>
+
+        <div class="db-metric-grid">
+          <div class="db-metric-box">
+            <div class="metric-num mono">${taskCount}</div>
+            <div class="metric-label">Tasks in DB</div>
+          </div>
+          <div class="db-metric-box">
+            <div class="metric-num mono">${compCount}</div>
+            <div class="metric-label">Companies Tracked</div>
+          </div>
+          <div class="db-metric-box">
+            <div class="metric-num mono">${pracCount}</div>
+            <div class="metric-label">Test Sessions</div>
+          </div>
+        </div>
+
+        <div style="display:flex;gap:8px;margin-top:16px;flex-wrap:wrap;">
+          <button class="btn small primary" id="db-sync-now">Save to Database Now</button>
+          <button class="btn small ghost" id="db-pull-now">Reload from Database</button>
+        </div>
+
+        <div class="modal-actions" style="margin-top:20px;">
+          <button class="btn ghost" id="m-cancel">Close</button>
+        </div>
+      </div>
+    </div>`;
+  }
+
   if (modalState.type === "company") {
     const isNew = modalState.id === "__new";
     const c = isNew ? { company: "", role: DATA.profile.targetRole || "", packageCtc: "", driveDate: todayKey(), stage: "Applied", notes: "" } : DATA.companies.find(x => x.id === modalState.id);
@@ -1719,6 +1922,13 @@ function attachHandlers() {
   document.querySelectorAll("[data-theme-set]").forEach(el => {
     el.onclick = () => {
       applyTheme(el.getAttribute("data-theme-set"));
+      render();
+    };
+  });
+
+  document.querySelectorAll("[data-bg-set]").forEach(el => {
+    el.onclick = () => {
+      applyBgStyle(el.getAttribute("data-bg-set"));
       render();
     };
   });
@@ -2180,6 +2390,96 @@ PROJECTS: Full-Stack Placement Portal (React, Node.js, PostgreSQL)
 
   const btnPrintReport = document.getElementById("btn-print-report");
   if (btnPrintReport) btnPrintReport.onclick = () => window.print();
+
+  // Database status and manager modal events
+  const btnDbStatus = document.getElementById("btn-db-status");
+  if (btnDbStatus) {
+    btnDbStatus.onclick = () => {
+      modalState = { type: "database" };
+      render();
+    };
+  }
+
+  const dbTestConnect = document.getElementById("db-test-connect");
+  if (dbTestConnect) {
+    dbTestConnect.onclick = async () => {
+      const uriInput = document.getElementById("db-uri-input");
+      if (!uriInput) return;
+      const uri = uriInput.value.trim();
+      if (!uri) {
+        alert("Please enter a valid MongoDB connection string.");
+        return;
+      }
+      dbTestConnect.disabled = true;
+      dbTestConnect.textContent = "Connecting...";
+      try {
+        const res = await fetch("/api/mongo-config", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ uri })
+        });
+        const data = await res.json();
+        if (data.ok) {
+          MONGO_STATE.connected = true;
+          MONGO_STATE.database = data.database;
+          MONGO_STATE.host = data.host;
+          MONGO_STATE.uriMasked = data.uriMasked;
+          MONGO_STATE.error = null;
+          flashSaved("Connected to MongoDB!");
+          syncMongoData();
+        } else {
+          MONGO_STATE.connected = false;
+          MONGO_STATE.error = data.error || "Connection failed";
+        }
+      } catch (err) {
+        MONGO_STATE.connected = false;
+        MONGO_STATE.error = "Failed to contact backend server. Make sure 'node server.js' is running.";
+      } finally {
+        dbTestConnect.disabled = false;
+        render();
+      }
+    };
+  }
+
+  const dbSyncNow = document.getElementById("db-sync-now");
+  if (dbSyncNow) {
+    dbSyncNow.onclick = async () => {
+      dbSyncNow.disabled = true;
+      dbSyncNow.textContent = "Saving...";
+      try {
+        const res = await fetch("/api/data", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(DATA)
+        });
+        if (res.ok) {
+          DB_STATE.connected = true;
+          DB_STATE.lastSync = new Date();
+          flashSaved("Saved to persistent database (career360.db)!");
+        } else {
+          flashSaved("Saved locally in browser");
+        }
+      } catch (e) {
+        flashSaved("Saved locally in browser");
+      } finally {
+        dbSyncNow.disabled = false;
+        dbSyncNow.textContent = "Save to Database Now";
+        render();
+      }
+    };
+  }
+
+  const dbPullNow = document.getElementById("db-pull-now");
+  if (dbPullNow) {
+    dbPullNow.onclick = async () => {
+      if (confirm("Reload workspace from persistent database? This will refresh all your tasks with data from data/career360.db.")) {
+        await fetchMongoData();
+        modalState = null;
+        flashSaved("Workspace reloaded from persistent database!");
+        render();
+      }
+    };
+  }
 }
 
 function buildTextReport() {
@@ -2246,10 +2546,21 @@ function escapeAttr(s) {
 ========================================================= */
 function init() {
   loadData();
-  applyTheme(DATA.theme || "midnight");
+  applyTheme(DATA.theme || "midnight", false);
+  applyBgStyle(DATA.bgStyle || "grid", false);
   syncStatsAndAchievements();
-  saveData();
+  saveData(false);
   render();
+
+  // Asynchronously connect to MongoDB backend
+  checkMongoStatus().then(() => {
+    if (MONGO_STATE.connected) {
+      fetchMongoData();
+    }
+  });
+
+  // Periodically check MongoDB status
+  setInterval(checkMongoStatus, 30000);
 }
 
 init();
