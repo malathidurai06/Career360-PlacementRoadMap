@@ -4,7 +4,7 @@
  *
  * Developed by: Malathi Durai
  * Repository: github.com/malathidurai06/Career360-PlacementRoadMap
- * Stack: Node.js, Express, MongoDB (Mongoose), Vanilla JavaScript (ES6+), Modern CSS3
+ * Stack: Node.js, Express, Firebase Firestore (API Key Sync), NeDB Local DB, Vanilla JavaScript (ES6+), Modern CSS3
  */
 
 const STORE_KEY = "placementTrackerData_v2";
@@ -250,92 +250,171 @@ let DB_STATE = {
   recordCount: 1,
   syncing: false,
   lastSync: null,
-  mongoConnected: false,
-  mongoUri: '',
+  firebaseConnected: false,
+  firebaseConfigured: false,
+  firebaseProjectId: '',
+  apiKeyMasked: '',
   error: null
 };
 
 let dbSyncTimer = null;
+let firebaseApp = null;
+let firestoreDb = null;
 
-async function checkMongoStatus() {
+function initFirebaseClient(cfg) {
+  if (!window.firebase || !cfg || !cfg.apiKey || !cfg.projectId) return false;
+  try {
+    if (!firebase.apps || !firebase.apps.length) {
+      firebaseApp = firebase.initializeApp(cfg);
+    } else {
+      firebaseApp = firebase.app();
+    }
+    firestoreDb = firebase.firestore();
+    DB_STATE.firebaseConnected = true;
+    DB_STATE.firebaseConfigured = true;
+    DB_STATE.firebaseProjectId = cfg.projectId;
+    DB_STATE.apiKeyMasked = cfg.apiKey ? (cfg.apiKey.slice(0, 4) + '****' + cfg.apiKey.slice(-4)) : '';
+    console.log('[Firebase] Cloud Firestore initialized successfully for:', cfg.projectId);
+    updateDbStatusPill();
+    return true;
+  } catch (err) {
+    console.warn('[Firebase] Initialization error:', err.message);
+    DB_STATE.firebaseConnected = false;
+    DB_STATE.error = err.message;
+    updateDbStatusPill();
+    return false;
+  }
+}
+
+async function checkDbStatus() {
   try {
     const res = await fetch('/api/status');
-    if (!res.ok) throw new Error('API server unavailable');
-    const json = await res.json();
-    DB_STATE.connected = !!json.connected;
-    DB_STATE.engine = json.engine || 'Persistent Local DB (NeDB)';
-    DB_STATE.file = json.dbFile || 'data/career360.db';
-    DB_STATE.recordCount = json.recordCount || 1;
-    if (json.mongoSync) {
-      DB_STATE.mongoConnected = !!json.mongoSync.connected;
-      DB_STATE.mongoUri = json.mongoSync.uriMasked || '';
-      DB_STATE.error = json.mongoSync.error || null;
+    if (res.ok) {
+      const json = await res.json();
+      DB_STATE.connected = !!json.connected;
+      DB_STATE.engine = json.engine || 'Persistent Local DB (NeDB)';
+      DB_STATE.file = json.dbFile || 'data/career360.db';
+      DB_STATE.recordCount = json.recordCount || 1;
+      if (json.firebase) {
+        DB_STATE.firebaseConfigured = !!json.firebase.configured;
+        DB_STATE.firebaseProjectId = json.firebase.projectId || '';
+        DB_STATE.apiKeyMasked = json.firebase.apiKeyMasked || '';
+      }
     }
   } catch (e) {
     DB_STATE.connected = false;
   }
+
+  // Restore cached Firebase config from localStorage if available
+  try {
+    const cachedFb = localStorage.getItem('career360_firebase_config');
+    if (cachedFb && !firestoreDb) {
+      const parsed = JSON.parse(cachedFb);
+      initFirebaseClient(parsed);
+    }
+  } catch (e) {}
+
   updateDbStatusPill();
 }
 
-async function fetchMongoData() {
+async function fetchRemoteData() {
   try {
     DB_STATE.syncing = true;
     updateDbStatusPill();
-    const res = await fetch('/api/data');
-    if (!res.ok) throw new Error('Could not fetch data from database');
-    const json = await res.json();
-    if (json.ok && json.data) {
-      const remote = json.data;
-      if (remote.tasks && remote.tasks.length > 0) {
-        DATA.tasks = remote.tasks;
-      }
-      if (remote.profile) {
-        DATA.profile = Object.assign(defaultData().profile, remote.profile);
-      }
-      if (remote.companies) DATA.companies = remote.companies;
-      if (remote.knownFlashcards) DATA.knownFlashcards = remote.knownFlashcards;
-      if (remote.stats) DATA.stats = remote.stats;
-      if (remote.achievements) DATA.achievements = remote.achievements;
-      if (remote.history) DATA.history = remote.history;
-      if (remote.checkinDates) DATA.checkinDates = remote.checkinDates;
-      if (remote.practiceHistory) DATA.practiceHistory = remote.practiceHistory;
-      if (remote.theme) {
-        DATA.theme = remote.theme;
-        applyTheme(remote.theme, false);
-      }
-      if (remote.bgStyle) {
-        DATA.bgStyle = remote.bgStyle;
-        applyBgStyle(remote.bgStyle, false);
-      }
 
-      DB_STATE.connected = true;
-      DB_STATE.lastSync = new Date();
-      saveData(false);
-      render();
+    let loadedFromCloud = false;
+    if (firestoreDb) {
+      try {
+        const docSnap = await firestoreDb.collection('career360').doc('default_student').get();
+        if (docSnap.exists) {
+          const remote = docSnap.data();
+          applyRemoteData(remote);
+          loadedFromCloud = true;
+          DB_STATE.firebaseConnected = true;
+          console.log('[Firebase] Loaded state from Cloud Firestore');
+        }
+      } catch (err) {
+        console.warn('[Firebase] Firestore read notice:', err.message);
+      }
     }
+
+    if (!loadedFromCloud) {
+      const res = await fetch('/api/data');
+      if (res.ok) {
+        const json = await res.json();
+        if (json.ok && json.data) {
+          applyRemoteData(json.data);
+          DB_STATE.connected = true;
+        }
+      }
+    }
+
+    DB_STATE.lastSync = new Date();
+    saveData(false);
+    render();
   } catch (err) {
-    console.log('[DB Sync] Loaded from browser cache:', err.message);
+    console.log('[DB Sync] Fallback to browser cache:', err.message);
   } finally {
     DB_STATE.syncing = false;
     updateDbStatusPill();
   }
 }
 
-function syncMongoData() {
+function applyRemoteData(remote) {
+  if (remote.tasks && remote.tasks.length > 0) DATA.tasks = remote.tasks;
+  if (remote.profile) DATA.profile = Object.assign(defaultData().profile, remote.profile);
+  if (remote.companies) DATA.companies = remote.companies;
+  if (remote.knownFlashcards) DATA.knownFlashcards = remote.knownFlashcards;
+  if (remote.stats) DATA.stats = remote.stats;
+  if (remote.achievements) DATA.achievements = remote.achievements;
+  if (remote.history) DATA.history = remote.history;
+  if (remote.checkinDates) DATA.checkinDates = remote.checkinDates;
+  if (remote.practiceHistory) DATA.practiceHistory = remote.practiceHistory;
+  if (remote.theme) {
+    DATA.theme = remote.theme;
+    applyTheme(remote.theme, false);
+  }
+  if (remote.bgStyle) {
+    DATA.bgStyle = remote.bgStyle;
+    applyBgStyle(remote.bgStyle, false);
+  }
+}
+
+function syncRemoteData() {
   if (dbSyncTimer) clearTimeout(dbSyncTimer);
   dbSyncTimer = setTimeout(async () => {
     try {
       DB_STATE.syncing = true;
       updateDbStatusPill();
-      const res = await fetch('/api/data', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(DATA)
-      });
-      if (res.ok) {
-        DB_STATE.connected = true;
-        DB_STATE.lastSync = new Date();
-        flashSaved('Saved to Database (career360.db)');
+
+      // 1. Sync to local persistent NeDB backend
+      try {
+        const res = await fetch('/api/data', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(DATA)
+        });
+        if (res.ok) {
+          DB_STATE.connected = true;
+          DB_STATE.lastSync = new Date();
+        }
+      } catch (err) {}
+
+      // 2. Sync to Cloud Firestore if initialized
+      if (firestoreDb && window.firebase) {
+        try {
+          await firestoreDb.collection('career360').doc('default_student').set({
+            ...DATA,
+            updatedAt: new Date().toISOString()
+          }, { merge: true });
+          DB_STATE.firebaseConnected = true;
+          flashSaved('Synced to Cloud Firestore & Local DB');
+        } catch (err) {
+          console.warn('[Firebase] Firestore write failed:', err.message);
+          flashSaved('Saved to Local Database (career360.db)');
+        }
+      } else {
+        flashSaved('Saved to Persistent Database (career360.db)');
       }
     } catch (e) {
       // Offline fallback
@@ -349,10 +428,12 @@ function syncMongoData() {
 function updateDbStatusPill() {
   const btn = document.getElementById('btn-db-status');
   if (!btn) return;
-  btn.className = `db-status-pill ${DB_STATE.connected ? 'connected' : 'offline'}`;
+  btn.className = `db-status-pill ${DB_STATE.firebaseConnected ? 'connected' : (DB_STATE.connected ? 'local' : 'offline')}`;
   const span = btn.querySelector('span:not(.db-dot)');
   if (span) {
-    span.textContent = DB_STATE.syncing ? 'Saving...' : (DB_STATE.connected ? '🟢 Database: Active' : 'Offline Mode');
+    span.textContent = DB_STATE.syncing
+      ? 'Syncing...'
+      : (DB_STATE.firebaseConnected ? '☁️ Firestore Active' : (DB_STATE.connected ? '💾 Local DB Active' : 'Offline Mode'));
   }
 }
 
@@ -396,7 +477,7 @@ function saveData(syncRemote = true) {
     localStorage.setItem(STORE_KEY, JSON.stringify(DATA));
     STORAGE_BLOCKED = false;
     if (syncRemote) {
-      syncMongoData();
+      syncRemoteData();
     }
     return true;
   } catch (e) {
@@ -797,9 +878,9 @@ function renderTopHeader() {
           <span>${daysLeft > 0 ? `${daysLeft} Days to Target Placement` : "Placement Season Active!"}</span>
         </div>
       ` : ""}
-      <button class="db-status-pill ${MONGO_STATE.connected ? 'connected' : 'offline'}" id="btn-db-status" title="MongoDB Connection & Storage Manager">
+      <button class="db-status-pill ${DB_STATE.firebaseConnected ? 'connected' : (DB_STATE.connected ? 'local' : 'offline')}" id="btn-db-status" title="Firebase & Persistent Local Database Manager">
         <span class="db-dot"></span>
-        <span>${MONGO_STATE.syncing ? 'Syncing...' : (MONGO_STATE.connected ? 'MongoDB Active' : 'Local Mode')}</span>
+        <span>${DB_STATE.syncing ? 'Syncing...' : (DB_STATE.firebaseConnected ? '☁️ Firestore Active' : (DB_STATE.connected ? '💾 Local DB Active' : 'Offline Mode'))}</span>
       </button>
       <button class="btn primary small" data-open-task="__new">${ICONS.plus} Quick Task</button>
     </div>
@@ -1819,30 +1900,60 @@ function renderProfile() {
 function renderModal() {
   if (modalState.type === "database") {
     const isConn = DB_STATE.connected;
+    const isFb = DB_STATE.firebaseConnected;
     const taskCount = DATA.tasks.length;
     const compCount = DATA.companies.length;
     const pracCount = DATA.practiceHistory.length;
 
     return `
     <div class="overlay" id="overlay">
-      <div class="modal" style="max-width: 540px;">
+      <div class="modal" style="max-width: 580px;">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
-          <h3 style="margin:0;">🗄️ Database Management Center</h3>
-          <span class="${isConn ? 'db-badge-connected' : 'db-badge-offline'}">
-            ● ${isConn ? 'Connected & Persistent' : 'Local Mode'}
+          <h3 style="margin:0;">🗄️ Database & Cloud Sync Center</h3>
+          <span class="${isFb ? 'db-badge-connected' : (isConn ? 'db-badge-local' : 'db-badge-offline')}">
+            ● ${isFb ? 'Cloud Firestore Active' : (isConn ? 'Local Persistent DB' : 'Offline Mode')}
           </span>
         </div>
 
-        <div style="padding:10px 14px;background:rgba(16,185,129,0.08);border:1px solid rgba(16,185,129,0.25);border-radius:10px;margin-bottom:14px;font-size:12px;line-height:1.5;">
-          <b style="color:var(--accent-emerald);">🟢 Active Database Engine:</b> <span>${escapeHtml(DB_STATE.engine || 'Persistent Local DB (NeDB)')}</span><br>
-          <span style="color:var(--text-muted);font-size:11.5px;">Storage File: <code class="mono" style="color:var(--accent-primary);">${escapeHtml(DB_STATE.file || 'data/career360.db')}</code></span><br>
-          <span style="color:var(--text-muted);font-size:11.5px;">All tasks, practice tests, companies, and goals are persistently stored on disk in your project folder.</span>
+        <!-- Local Persistent Storage Banner -->
+        <div style="padding:10px 14px;background:rgba(16,185,129,0.08);border:1px solid rgba(16,185,129,0.25);border-radius:10px;margin-bottom:12px;font-size:12px;line-height:1.5;">
+          <b style="color:var(--accent-emerald);">🟢 Local Persistent Database:</b> <span>Active & Auto-Saving</span><br>
+          <span style="color:var(--text-muted);font-size:11.5px;">Storage File: <code class="mono" style="color:var(--accent-primary);">${escapeHtml(DB_STATE.file || 'data/career360.db')}</code> (Zero-configuration embedded document store)</span>
+        </div>
+
+        <!-- Cloud Firestore API Key Sync Section -->
+        <div style="padding:12px 14px;background:var(--bg-surface-elevated);border:1px solid var(--border-subtle);border-radius:10px;margin-bottom:14px;">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+            <b style="font-size:13px;color:var(--primary);">☁️ Firebase Cloud Firestore Sync (API Key)</b>
+            <span style="font-size:11px;padding:2px 8px;border-radius:12px;background:${isFb ? 'rgba(16,185,129,0.15);color:var(--accent-emerald)' : 'rgba(245,158,11,0.15);color:var(--accent-amber)'};font-weight:600;">
+              ${isFb ? 'Connected' : (DB_STATE.firebaseConfigured ? 'Configured' : 'Optional')}
+            </span>
+          </div>
+          <p style="font-size:11.5px;color:var(--text-muted);margin:0 0 10px;line-height:1.4;">
+            No database server installation required. Simply connect with your Google Firebase Web API Key & Project ID to automatically sync across devices.
+          </p>
+
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">
+            <div class="field" style="margin:0;">
+              <label style="font-size:11px;">Firebase Web API Key</label>
+              <input type="text" class="input-control" id="fb-api-key" placeholder="AIzaSy..." value="${escapeAttr(DB_STATE.apiKeyMasked || '')}">
+            </div>
+            <div class="field" style="margin:0;">
+              <label style="font-size:11px;">Firebase Project ID</label>
+              <input type="text" class="input-control" id="fb-project-id" placeholder="e.g. career360-app" value="${escapeAttr(DB_STATE.firebaseProjectId || '')}">
+            </div>
+          </div>
+
+          <div style="display:flex;gap:8px;align-items:center;justify-content:space-between;margin-top:6px;">
+            <button class="btn small primary" id="fb-test-connect">${isFb ? 'Re-Connect Firestore' : 'Connect Cloud Firestore'}</button>
+            <span style="font-size:11px;color:var(--text-faint);">Safe for GitHub: Keys stay in your local .env</span>
+          </div>
         </div>
 
         <div class="db-metric-grid">
           <div class="db-metric-box">
             <div class="metric-num mono">${taskCount}</div>
-            <div class="metric-label">Tasks in DB</div>
+            <div class="metric-label">Tasks in Database</div>
           </div>
           <div class="db-metric-box">
             <div class="metric-num mono">${compCount}</div>
@@ -1854,12 +1965,12 @@ function renderModal() {
           </div>
         </div>
 
-        <div style="display:flex;gap:8px;margin-top:16px;flex-wrap:wrap;">
-          <button class="btn small primary" id="db-sync-now">Save to Database Now</button>
+        <div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap;">
+          <button class="btn small primary" id="db-sync-now">Save All Data Now</button>
           <button class="btn small ghost" id="db-pull-now">Reload from Database</button>
         </div>
 
-        <div class="modal-actions" style="margin-top:20px;">
+        <div class="modal-actions" style="margin-top:18px;">
           <button class="btn ghost" id="m-cancel">Close</button>
         </div>
       </div>
@@ -2400,42 +2511,73 @@ PROJECTS: Full-Stack Placement Portal (React, Node.js, PostgreSQL)
     };
   }
 
-  const dbTestConnect = document.getElementById("db-test-connect");
-  if (dbTestConnect) {
-    dbTestConnect.onclick = async () => {
-      const uriInput = document.getElementById("db-uri-input");
-      if (!uriInput) return;
-      const uri = uriInput.value.trim();
-      if (!uri) {
-        alert("Please enter a valid MongoDB connection string.");
+  const fbTestConnect = document.getElementById("fb-test-connect");
+  if (fbTestConnect) {
+    fbTestConnect.onclick = async () => {
+      const apiKeyInput = document.getElementById("fb-api-key");
+      const projIdInput = document.getElementById("fb-project-id");
+      if (!apiKeyInput || !projIdInput) return;
+
+      let apiKey = apiKeyInput.value.trim();
+      let projectId = projIdInput.value.trim();
+
+      // If user left masked key and had cached key, reuse cached
+      if (apiKey.includes("****")) {
+        try {
+          const cached = JSON.parse(localStorage.getItem('career360_firebase_config') || '{}');
+          if (cached.apiKey) apiKey = cached.apiKey;
+        } catch (e) {}
+      }
+
+      if (!apiKey || apiKey.includes("****") || !projectId) {
+        alert("Please enter a valid Firebase Web API Key and Project ID.");
         return;
       }
-      dbTestConnect.disabled = true;
-      dbTestConnect.textContent = "Connecting...";
+
+      fbTestConnect.disabled = true;
+      fbTestConnect.textContent = "Connecting to Cloud Firestore...";
+
       try {
-        const res = await fetch("/api/mongo-config", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ uri })
-        });
-        const data = await res.json();
-        if (data.ok) {
-          MONGO_STATE.connected = true;
-          MONGO_STATE.database = data.database;
-          MONGO_STATE.host = data.host;
-          MONGO_STATE.uriMasked = data.uriMasked;
-          MONGO_STATE.error = null;
-          flashSaved("Connected to MongoDB!");
-          syncMongoData();
-        } else {
-          MONGO_STATE.connected = false;
-          MONGO_STATE.error = data.error || "Connection failed";
+        const config = {
+          apiKey,
+          projectId,
+          authDomain: `${projectId}.firebaseapp.com`
+        };
+
+        const initialized = initFirebaseClient(config);
+        if (!initialized) {
+          throw new Error("Could not initialize Firebase SDK. Please verify your API Key.");
         }
+
+        // Cache in browser
+        localStorage.setItem('career360_firebase_config', JSON.stringify(config));
+
+        // Persist to backend .env so server also knows about it
+        try {
+          await fetch("/api/firebase-config", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(config)
+          });
+        } catch (serverErr) {}
+
+        // Test writing current tracker data to Cloud Firestore
+        await firestoreDb.collection('career360').doc('default_student').set({
+          ...DATA,
+          updatedAt: new Date().toISOString()
+        }, { merge: true });
+
+        DB_STATE.firebaseConnected = true;
+        DB_STATE.firebaseConfigured = true;
+        flashSaved("Successfully connected & synced to Google Cloud Firestore!");
+        alert("🎉 Cloud Firestore connected! Your career tracker is now syncing in real-time to Google Cloud.");
       } catch (err) {
-        MONGO_STATE.connected = false;
-        MONGO_STATE.error = "Failed to contact backend server. Make sure 'node server.js' is running.";
+        console.error("Firebase connection error:", err);
+        DB_STATE.firebaseConnected = false;
+        alert("Firebase Connection Error: " + (err.message || "Failed to connect to Cloud Firestore. Make sure Firestore rules allow read/write."));
       } finally {
-        dbTestConnect.disabled = false;
+        fbTestConnect.disabled = false;
+        fbTestConnect.textContent = "Connect Cloud Firestore";
         render();
       }
     };
@@ -2447,24 +2589,16 @@ PROJECTS: Full-Stack Placement Portal (React, Node.js, PostgreSQL)
       dbSyncNow.disabled = true;
       dbSyncNow.textContent = "Saving...";
       try {
-        const res = await fetch("/api/data", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(DATA)
-        });
-        if (res.ok) {
-          DB_STATE.connected = true;
-          DB_STATE.lastSync = new Date();
-          flashSaved("Saved to persistent database (career360.db)!");
-        } else {
-          flashSaved("Saved locally in browser");
-        }
+        syncRemoteData();
+        flashSaved(DB_STATE.firebaseConnected ? "Saved to Cloud Firestore & Local DB!" : "Saved to persistent database (career360.db)!");
       } catch (e) {
         flashSaved("Saved locally in browser");
       } finally {
-        dbSyncNow.disabled = false;
-        dbSyncNow.textContent = "Save to Database Now";
-        render();
+        setTimeout(() => {
+          dbSyncNow.disabled = false;
+          dbSyncNow.textContent = "Save All Data Now";
+          render();
+        }, 800);
       }
     };
   }
@@ -2472,10 +2606,10 @@ PROJECTS: Full-Stack Placement Portal (React, Node.js, PostgreSQL)
   const dbPullNow = document.getElementById("db-pull-now");
   if (dbPullNow) {
     dbPullNow.onclick = async () => {
-      if (confirm("Reload workspace from persistent database? This will refresh all your tasks with data from data/career360.db.")) {
-        await fetchMongoData();
+      if (confirm("Reload workspace from database? This will refresh all your tasks with the latest saved data.")) {
+        await fetchRemoteData();
         modalState = null;
-        flashSaved("Workspace reloaded from persistent database!");
+        flashSaved("Workspace refreshed with latest database state!");
         render();
       }
     };
@@ -2552,15 +2686,13 @@ function init() {
   saveData(false);
   render();
 
-  // Asynchronously connect to MongoDB backend
-  checkMongoStatus().then(() => {
-    if (MONGO_STATE.connected) {
-      fetchMongoData();
-    }
+  // Connect to persistent local database and Firebase Firestore
+  checkDbStatus().then(() => {
+    fetchRemoteData();
   });
 
-  // Periodically check MongoDB status
-  setInterval(checkMongoStatus, 30000);
+  // Periodically refresh database status
+  setInterval(checkDbStatus, 30000);
 }
 
 init();

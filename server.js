@@ -1,7 +1,7 @@
 /**
  * Career360 — Placement Preparation & Career Roadmap Tracker
  * Full-Stack Node.js & Express Server with Embedded Persistent Database (NeDB)
- * and Optional Cloud MongoDB Sync.
+ * and Cloud Firebase Firestore Sync (API Key Based).
  *
  * Developed by: Malathi Durai
  * Repository: github.com/malathidurai06/Career360-PlacementRoadMap
@@ -13,17 +13,11 @@ const cors = require('cors');
 const path = require('path');
 const fs = require('fs');
 const Datastore = require('nedb-promises');
-let mongoose = null;
-try {
-  mongoose = require('mongoose');
-} catch (e) {
-  // Mongoose is optional
-}
 
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-// Ensure database directory exists
+// Ensure local database directory exists
 const DATA_DIR = path.join(__dirname, 'data');
 if (!fs.existsSync(DATA_DIR)) {
   fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -43,39 +37,11 @@ app.use(express.urlencoded({ extended: true }));
 // Serve static frontend files
 app.use(express.static(path.join(__dirname)));
 
-// MongoDB Optional Connection State Tracking
-let isMongoConnected = false;
-let lastMongoError = null;
-let currentMongoUri = process.env.MONGODB_URI || '';
-
-function maskUri(uri) {
-  if (!uri) return '';
-  return uri.replace(/:([^:@]+)@/, ':****@');
-}
-
-async function connectToMongo(uri) {
-  if (!mongoose || !uri || !uri.startsWith('mongodb')) return;
-  try {
-    if (mongoose.connection.readyState === 1) {
-      await mongoose.disconnect();
-    }
-    console.log(`[MongoDB] Attempting background sync connection to: ${maskUri(uri)}`);
-    await mongoose.connect(uri, {
-      serverSelectionTimeoutMS: 4000
-    });
-    isMongoConnected = true;
-    lastMongoError = null;
-    currentMongoUri = uri;
-    console.log(`[MongoDB] Connected successfully to "${mongoose.connection.name}" on ${mongoose.connection.host}`);
-  } catch (err) {
-    isMongoConnected = false;
-    lastMongoError = err.message;
-    console.warn(`[MongoDB] Cloud sync offline (${err.message}). Local Embedded Database is active.`);
-  }
-}
-
-if (currentMongoUri) {
-  connectToMongo(currentMongoUri);
+// Helper to mask sensitive keys
+function maskKey(key) {
+  if (!key || typeof key !== 'string') return '';
+  if (key.length <= 8) return '****';
+  return key.slice(0, 4) + '****' + key.slice(-4);
 }
 
 // Initial starter curriculum tasks for first launch
@@ -132,7 +98,7 @@ async function getOrSeedData() {
       updatedAt: new Date().toISOString()
     };
     await localDb.insert(doc);
-    console.log('[Database] Seeded initial student record in data/career360.db');
+    console.log('[Database] Initial student record seeded in data/career360.db');
   }
   return doc;
 }
@@ -143,22 +109,27 @@ async function getOrSeedData() {
 
 /**
  * GET /api/status
- * Returns database health, active storage engine, and file info
+ * Returns database health, active storage engine, and Firebase sync status
  */
 app.get('/api/status', async (req, res) => {
   try {
     const docCount = await localDb.count({});
+    const hasFirebase = Boolean(process.env.FIREBASE_API_KEY && process.env.FIREBASE_PROJECT_ID);
+
     res.json({
       ok: true,
       connected: true,
-      databaseType: 'embedded',
-      engine: 'NeDB Persistent File Database',
+      databaseType: 'embedded-hybrid',
+      engine: 'NeDB Persistent File Database + Cloud Firestore Sync',
       dbFile: 'data/career360.db',
       recordCount: docCount,
-      mongoSync: {
-        connected: isMongoConnected,
-        uriMasked: maskUri(currentMongoUri),
-        error: lastMongoError
+      firebase: {
+        configured: hasFirebase,
+        apiKeyMasked: maskKey(process.env.FIREBASE_API_KEY),
+        projectId: process.env.FIREBASE_PROJECT_ID || '',
+        authDomain: process.env.FIREBASE_AUTH_DOMAIN || (process.env.FIREBASE_PROJECT_ID ? `${process.env.FIREBASE_PROJECT_ID}.firebaseapp.com` : ''),
+        storageBucket: process.env.FIREBASE_STORAGE_BUCKET || '',
+        appId: process.env.FIREBASE_APP_ID ? maskKey(process.env.FIREBASE_APP_ID) : ''
       },
       timestamp: new Date().toISOString()
     });
@@ -304,32 +275,48 @@ app.delete('/api/companies/:id', async (req, res) => {
 });
 
 /**
- * POST /api/mongo-config
- * Optional MongoDB connection endpoint for users who want external cloud sync
+ * POST /api/firebase-config
+ * Updates Firebase credentials in memory and writes to local .env file securely
  */
-app.post('/api/mongo-config', async (req, res) => {
-  const { uri } = req.body;
-  if (!uri || typeof uri !== 'string') {
-    return res.status(400).json({ ok: false, error: 'A valid MongoDB URI string is required.' });
+app.post('/api/firebase-config', async (req, res) => {
+  const { apiKey, projectId, authDomain, storageBucket, appId } = req.body;
+
+  if (!apiKey || !projectId) {
+    return res.status(400).json({
+      ok: false,
+      error: 'Both Firebase API Key and Project ID are required.'
+    });
   }
 
   try {
-    await connectToMongo(uri.trim());
-    if (isMongoConnected) {
-      res.json({
-        ok: true,
-        message: 'Successfully connected to MongoDB Atlas!',
-        database: mongoose.connection.name,
-        host: mongoose.connection.host,
-        uriMasked: maskUri(uri)
-      });
-    } else {
-      res.status(400).json({
-        ok: false,
-        error: lastMongoError || 'Could not connect. (Local Embedded Database remains active)'
-      });
-    }
+    process.env.FIREBASE_API_KEY = apiKey.trim();
+    process.env.FIREBASE_PROJECT_ID = projectId.trim();
+    if (authDomain) process.env.FIREBASE_AUTH_DOMAIN = authDomain.trim();
+    if (storageBucket) process.env.FIREBASE_STORAGE_BUCKET = storageBucket.trim();
+    if (appId) process.env.FIREBASE_APP_ID = appId.trim();
+
+    // Persist to .env file
+    const envPath = path.join(__dirname, '.env');
+    const envLines = [
+      `PORT=${PORT}`,
+      `FIREBASE_API_KEY=${process.env.FIREBASE_API_KEY}`,
+      `FIREBASE_PROJECT_ID=${process.env.FIREBASE_PROJECT_ID}`,
+      `FIREBASE_AUTH_DOMAIN=${process.env.FIREBASE_AUTH_DOMAIN || `${process.env.FIREBASE_PROJECT_ID}.firebaseapp.com`}`,
+      `FIREBASE_STORAGE_BUCKET=${process.env.FIREBASE_STORAGE_BUCKET || ''}`,
+      `FIREBASE_APP_ID=${process.env.FIREBASE_APP_ID || ''}`
+    ];
+    fs.writeFileSync(envPath, envLines.join('\n') + '\n', 'utf8');
+
+    console.log(`[Firebase] Configuration saved for Project: ${process.env.FIREBASE_PROJECT_ID}`);
+
+    res.json({
+      ok: true,
+      message: 'Firebase configuration saved successfully!',
+      projectId: process.env.FIREBASE_PROJECT_ID,
+      apiKeyMasked: maskKey(process.env.FIREBASE_API_KEY)
+    });
   } catch (err) {
+    console.error('[Firebase Config Error]:', err);
     res.status(500).json({ ok: false, error: err.message });
   }
 });
@@ -345,6 +332,7 @@ app.listen(PORT, () => {
   console.log(`🚀 Career360 Full-Stack Application is running!`);
   console.log(`📍 Web URL: http://localhost:${PORT}`);
   console.log(`🗄️  Active Database: Embedded File DB (data/career360.db)`);
+  console.log(`☁️  Cloud Sync: Firebase Cloud Firestore (API Key Ready)`);
   console.log(`💾 Persistence: Auto-persisting all records to disk`);
   console.log(`=======================================================`);
 });

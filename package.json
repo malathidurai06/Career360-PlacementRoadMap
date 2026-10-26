@@ -1,7 +1,7 @@
 {
   "name": "career360-placement-roadmap",
   "version": "1.0.0",
-  "description": "Full-stack student career roadmap & placement readiness tracking portal with MongoDB, Node.js, Express, and Chart.js.",
+  "description": "Full-stack student career roadmap & placement readiness tracking portal with Firebase Firestore, Node.js, Express, NeDB, and Chart.js.",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
@@ -11,7 +11,8 @@
     "career-tracker",
     "placement-preparation",
     "dsa-roadmap",
-    "mongodb",
+    "firebase",
+    "firestore",
     "express",
     "nodejs",
     "student-portfolio"
@@ -22,7 +23,6 @@
     "cors": "^2.8.6",
     "dotenv": "^18.0.7",
     "express": "^5.3.0",
-    "mongoose": "^9.11.1",
     "nedb-promises": "^6.2.4"
   }
 }

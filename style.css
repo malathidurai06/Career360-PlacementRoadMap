@@ -1856,9 +1856,14 @@ textarea.input-control:focus {
 }
 
 .db-status-pill.connected .db-dot {
-  background: var(--accent-emerald);
-  box-shadow: 0 0 8px var(--accent-emerald);
+  background: var(--accent-cyan);
+  box-shadow: 0 0 8px var(--accent-cyan);
   animation: pulse 1.8s infinite;
+}
+
+.db-status-pill.local .db-dot {
+  background: var(--accent-emerald);
+  box-shadow: 0 0 6px var(--accent-emerald);
 }
 
 .db-status-pill.offline .db-dot {
@@ -1933,6 +1938,19 @@ textarea.input-control:focus {
 }
 
 .db-badge-connected {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 600;
+  background: rgba(6, 182, 212, 0.15);
+  color: var(--accent-cyan);
+  border: 1px solid rgba(6, 182, 212, 0.3);
+}
+
+.db-badge-local {
   display: inline-flex;
   align-items: center;
   gap: 6px;

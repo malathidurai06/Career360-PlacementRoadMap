@@ -2,7 +2,8 @@
 
 [![Node.js](https://img.shields.io/badge/Node.js-v20+-68a063?style=flat&logo=node.js)](https://nodejs.org/)
 [![Express](https://img.shields.io/badge/Express-5.x-000000?style=flat&logo=express)](https://expressjs.com/)
-[![MongoDB](https://img.shields.io/badge/MongoDB-Mongoose-47a248?style=flat&logo=mongodb)](https://www.mongodb.com/)
+[![Firebase](https://img.shields.io/badge/Firebase-Firestore-ffca28?style=flat&logo=firebase)](https://firebase.google.com/)
+[![NeDB](https://img.shields.io/badge/Database-Embedded_NeDB-06b6d4?style=flat)](https://github.com/bajankristof/nedb-promises)
 [![JavaScript](https://img.shields.io/badge/Vanilla_JS-ES6+-f7df1e?style=flat&logo=javascript)](https://developer.mozilla.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
@@ -14,20 +15,24 @@ Developed by **Malathi Durai** ([@malathidurai06](https://github.com/malathidura
 
 ## 🏗️ System Architecture
 
-Career360 uses a dual-layer data synchronization architecture:
-- **Primary Data Layer**: MongoDB database managed via a Node.js & Express REST API backend using Mongoose models.
-- **Offline Resilience Layer**: In-browser `localStorage` cache ensuring instant initial renders and offline functionality even when the database server is temporarily offline.
+Career360 uses a high-performance, developer-friendly **Hybrid Persistence Architecture**:
+- **Instant Persistent Local Layer (NeDB)**: Embedded file-backed NoSQL document store (`data/career360.db`). Runs immediately upon cloning with **zero database installation required**.
+- **Cloud Synchronization Layer (Google Firebase Firestore)**: Syncs student roadmaps across devices using a standard Firebase Web API Key & Project ID.
+- **Offline Resilience Layer**: In-browser `localStorage` cache ensuring instant initial renders and full offline functionality.
+- **GitHub-Ready & Secure**: No credentials or connection strings are ever leaked to git. All sensitive keys remain in `.env` (gitignored).
 
 ```mermaid
 graph TD
-    Client["Browser Client (Vanilla JS + CSS3 + Chart.js)"]
+    Client["Browser Client (Vanilla JS + CSS3 + Chart.js + Firebase SDK)"]
     ExpressAPI["Express.js Server (Port 5000)"]
-    Mongo["MongoDB Database (Mongoose ODM)"]
+    NeDB[("Local Persistent NeDB File DB (data/career360.db)")]
+    Firestore[("Google Cloud Firestore (API Key Sync)")]
     LocalCache[("Browser localStorage Cache")]
 
     Client <-->|"Instant UI Reads & Offline Fallback"| LocalCache
     Client <-->|"REST API Requests (/api/data, /api/tasks)"| ExpressAPI
-    ExpressAPI <-->|"Queries & Mutations"| Mongo
+    ExpressAPI <-->|"Persistent Disk Storage"| NeDB
+    Client -.->|"Real-Time Cloud Sync (API Key)"| Firestore
 ```
 
 ---
@@ -90,12 +95,17 @@ Customize the visual experience on the fly with instant persistence:
 
 ---
 
-## 🗄️ MongoDB Integration & Database Configuration
+## 🗄️ Database & Cloud Sync Configuration
 
-Career360 comes with a built-in **MongoDB Database Manager**:
-- **Automatic Status Detection**: A live status indicator pill in the header shows `🟢 MongoDB Active` when connected and `🟡 Local Mode` when offline.
-- **Dynamic URI Configuration**: Click the database status pill to test and switch between local MongoDB (`mongodb://127.0.0.1:27017/career360`) or **MongoDB Atlas** cloud connection strings (`mongodb+srv://...`) directly from the web interface.
-- **One-Click Sync**: Push local progress to MongoDB or reload workspace data from the database at any time.
+### Zero-Setup Default:
+Career360 automatically starts with an embedded file database (`data/career360.db`). You do not need to install MongoDB, MySQL, or any other software.
+
+### Optional Cloud Sync with Firebase Firestore (API Key):
+1. Create a free project on [Firebase Console](https://console.firebase.google.com/).
+2. Enable **Cloud Firestore** in test mode.
+3. In Project Settings > Web App, copy your **Web API Key** and **Project ID**.
+4. Open the Career360 web portal, click the **Database Status Pill** in the top navigation, paste your keys, and click **Connect Cloud Firestore**.
+5. Your roadmap data will now automatically sync across devices in real time.
 
 ---
 
@@ -103,7 +113,6 @@ Career360 comes with a built-in **MongoDB Database Manager**:
 
 ### Prerequisites
 - [Node.js](https://nodejs.org/) (v18 or higher)
-- [MongoDB Community Server](https://www.mongodb.com/try/download/community) (optional, if running a local database) OR a free [MongoDB Atlas](https://www.mongodb.com/atlas) cluster URI.
 
 ### 1. Clone the Repository
 ```bash
@@ -116,20 +125,7 @@ cd Career360-PlacementRoadMap
 npm install
 ```
 
-### 3. Configure Environment Variables
-Copy `.env.example` to `.env`:
-```bash
-cp .env.example .env
-```
-Default `.env` configuration:
-```env
-PORT=5000
-MONGODB_URI=mongodb://127.0.0.1:27017/career360
-```
-> **Note**: If you want to use MongoDB Atlas, simply replace `MONGODB_URI` with your connection string:
-> `MONGODB_URI=mongodb+srv://<username>:<password>@cluster0.mongodb.net/career360?retryWrites=true&w=majority`
-
-### 4. Start the Application
+### 3. Start the Application
 ```bash
 npm start
 ```
@@ -149,30 +145,30 @@ http://localhost:5000
 
 | Method | Endpoint | Description |
 |---|---|---|
-| `GET` | `/api/status` | Check MongoDB connection health and database details |
-| `GET` | `/api/data` | Fetch current student roadmap document from MongoDB |
-| `POST` | `/api/data` | Save/Sync entire user data document to MongoDB |
-| `POST` | `/api/tasks` | Add or update a specific task in MongoDB |
-| `DELETE` | `/api/tasks/:id` | Remove a task from MongoDB |
-| `POST` | `/api/profile` | Update student profile information in MongoDB |
-| `POST` | `/api/companies` | Add or update a company drive in MongoDB |
-| `DELETE` | `/api/companies/:id` | Delete a company drive entry from MongoDB |
-| `POST` | `/api/mongo-config` | Test and switch MongoDB connection URI dynamically |
+| `GET` | `/api/status` | Check database health, persistent file status, and Firebase sync configuration |
+| `GET` | `/api/data` | Fetch current student roadmap document from database |
+| `POST` | `/api/data` | Save/Sync entire user data document to persistent database |
+| `POST` | `/api/tasks` | Add or update a specific task |
+| `DELETE` | `/api/tasks/:id` | Remove a task |
+| `POST` | `/api/profile` | Update student profile information |
+| `POST` | `/api/companies` | Add or update a company drive |
+| `DELETE` | `/api/companies/:id` | Delete a company drive entry |
+| `POST` | `/api/firebase-config` | Update and save Firebase API Key configuration securely to `.env` |
 
 ---
 
 ## 📂 Project Directory Structure
 
 ```
-├── models/
-│   └── CareerData.js       # Mongoose Schema & Model for student progress
-├── .env.example            # Environment variables template
-├── .env                    # Active environment variables
-├── index.html              # Core single-page application structure
-├── package.json            # Node.js project configuration & dependencies
+├── data/
+│   └── career360.db        # Embedded persistent JSON/document database
+├── .env.example            # Environment variables template (Firebase API Key guide)
+├── .env                    # Active local environment variables (gitignored)
+├── index.html              # Core single-page application structure + Firebase SDK
+├── package.json            # Node.js dependencies (Express, NeDB, CORS, Dotenv)
 ├── README.md               # Project documentation
-├── script.js               # Frontend application logic, SPA router & API sync
-├── server.js               # Express REST API backend with MongoDB connection
+├── script.js               # Frontend application logic, Firebase sync & SPA router
+├── server.js               # Express REST API backend with embedded NeDB & Firebase config
 └── style.css               # Design system, glassmorphism tokens, and themes
 ```
 

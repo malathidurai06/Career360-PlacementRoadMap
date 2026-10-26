@@ -226,7 +226,7 @@ The backend provides a clean RESTful interface:
 | `POST` | `/api/profile` | Updates student demographic, target role, and timeline records | `200 OK` |
 | `POST` | `/api/companies` | Upserts placement drive records | `200 OK` |
 | `DELETE` | `/api/companies/:id` | Removes company drive by unique ID | `200 OK` |
-| `POST` | `/api/mongo-config` | Tests and switches remote MongoDB Atlas cluster connection strings | `200 OK` / `400` |
+| `POST` | `/api/firebase-config` | Updates and saves Google Firebase Firestore API Key configuration securely | `200 OK` / `400` |
 
 #### 3.3.3 JWT Authentication & Bcrypt Password Security
 For secure multi-tenant data segregation, an authentication and cryptographic security module was designed:
@@ -246,10 +246,10 @@ To enable multi-device and multi-tab synchronization, WebSocket event pipelines 
 
 ### 3.4 Week 4 (June 23 – July 02): Database & Project Completion
 
-#### 3.4.1 Document Database Architecture & Mongoose Modeling
-To guarantee 100% platform availability across diverse development environments (avoiding cloud IP whitelist blocks or uninstalled local server services), a **Resilient Dual-Tier Document Database Architecture** was engineered:
+#### 3.4.1 Hybrid Document Database Architecture & Firebase Cloud Sync
+To guarantee 100% platform availability across diverse development environments (avoiding cloud IP whitelist blocks or uninstalled local server services), a **Hybrid Document Database Architecture** was engineered:
 1. **Primary Embedded Document Store (NeDB):** A pure-JavaScript, file-backed NoSQL database engine writing directly to `data/career360.db`. It shares identical query APIs with MongoDB (`find`, `findOne`, `update`, `insert`), executing sub-millisecond atomic file operations without requiring external background services.
-2. **Secondary Cloud Cluster (MongoDB Atlas / Mongoose):** Schema models defined in `models/CareerData.js` support optional cloud synchronization for distributed production deployments.
+2. **Secondary Cloud Sync (Google Firebase Firestore via API Key):** Connects using standard Web API Keys and Project IDs, enabling seamless multi-device cloud synchronization without leaking database credentials to GitHub.
 
 ```javascript
 // Database Architecture Definition in server.js
@@ -312,7 +312,7 @@ The full-stack application successfully achieved all targeted milestones. The pr
 4. **Challenge 4 — ATS Keyword Extraction Accuracy:** Basic substring searches in resume parsing produced false positives (e.g., matching `java` inside `javascript`).
 
 ### 5.2 Solutions Implemented
-1. **Solution 1 — Resilient Embedded Document Database:** Designed a persistent, file-based embedded NoSQL database (`data/career360.db` using `nedb-promises`). This ensures 100% out-of-the-box reliability without requiring third-party cloud logins or background services, while retaining an optional MongoDB cloud sync interface.
+1. **Solution 1 — Resilient Embedded Document Database & API Key Cloud Sync:** Designed a persistent, file-based embedded NoSQL database (`data/career360.db` using `nedb-promises`). This ensures 100% out-of-the-box reliability without requiring third-party cloud logins or background services, while offering Google Firebase Cloud Firestore synchronization via standard API Keys.
 2. **Solution 2 — Debounced Synchronization with Optimistic UI:** Implemented a 600ms debounced network synchronization layer. The user interface updates instantaneously (optimistic update), while disk writes are cleanly batched.
 3. **Solution 3 — GPU Hardware Acceleration:** Utilized `transform: translate3d(0,0,0)` and `will-change: transform` to force GPU compositing for background shaders, maintaining smooth 60fps rendering.
 4. **Solution 4 — Boundary-Aware RegEx Tokenizer:** Replaced substring checking with word-boundary regular expressions (`\b(?<!-)${token}(?!-)\b`), stop-word elimination, and normalized technical dictionary matching.
@@ -371,7 +371,7 @@ graph TD
 
     subgraph "Persistent Storage Layer"
         EmbeddedDB[("Primary: Persistent File DB<br/>data/career360.db (NeDB)")]
-        CloudDB[("Secondary Optional:<br/>MongoDB Atlas Cloud Cluster")]
+        CloudDB[("Secondary Optional:<br/>Google Cloud Firestore (API Key)")]
     end
 
     Router <--> EmbeddedDB
